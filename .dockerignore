@@ -1,0 +1,16 @@
+node_modules
+.git
+.github
+test
+e2e
+playwright.config.js
+test-results
+playwright-report
+picture
+src/**/*.md
+README.md
+data/qa-records.jsonl
+.env
+.env.*
+*.log
+.DS_Store

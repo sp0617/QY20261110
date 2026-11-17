@@ -1,0 +1,20 @@
+{
+  "name": "ai-qa-assistant",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI 答疑助手：检索课程资料并调用兼容 OpenAI 协议的大模型作答（纯 Node.js，无第三方依赖）",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "test:e2e": "playwright test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  }
+}

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI 答疑助手 · 课程资料问答</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234f46e5'/%3E%3Ctext x='32' y='42' font-size='28' text-anchor='middle' fill='white' font-family='sans-serif'%3EAI%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">AI</div>
+        <div class="brand-text">
+          <h1>AI 答疑助手</h1>
+          <p>先检索课程资料，再交给大模型作答</p>
+        </div>
+      </div>
+      <div class="status" id="status" title="正在检查服务状态">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="statusText">正在检查服务状态…</span>
+      </div>
+    </header>
+
+    <div class="demo-banner" id="demoBanner" hidden>
+      <strong>演示模式</strong>
+      <span>当前未配置 <code>LLM_API_KEY</code>，系统会返回预设回答，不会真正调用大模型。配置后重启服务即可切换为在线模式。</span>
+    </div>
+
+    <main class="layout">
+      <section class="chat-panel" aria-label="问答区域">
+        <div class="chat" id="chat" aria-live="polite">
+          <div class="welcome" id="welcome">
+            <div class="welcome-icon" aria-hidden="true">?</div>
+            <h2>你好，我是课程答疑助手</h2>
+            <p>我的回答来自课程资料《人工智能导论》。可以点击下面的问题快速体验：</p>
+            <div class="suggestions" id="suggestions">
+              <button type="button" data-question="什么是过拟合？如何避免过拟合？">什么是过拟合？如何避免？</button>
+              <button type="button" data-question="RAG 的完整流程是什么？它和直接提问有什么区别？">RAG 的完整流程是什么？</button>
+              <button type="button" data-question="Transformer 中的自注意力机制是怎么工作的？">自注意力机制是怎么工作的？</button>
+              <button type="button" data-question="没有配置 LLM_API_KEY 时，系统会怎么运行？">没有 API Key 会怎样？</button>
+            </div>
+          </div>
+        </div>
+
+        <form class="composer" id="composer">
+          <label class="sr-only" for="question">输入你的问题</label>
+          <textarea
+            id="question"
+            name="question"
+            rows="2"
+            maxlength="1000"
+            placeholder="输入你的问题，例如：RAG 的完整流程是什么？"
+            autocomplete="off"
+          ></textarea>
+          <button type="submit" id="sendBtn">发送</button>
+        </form>
+        <p class="composer-hint" id="composerHint">Enter 发送 · Shift + Enter 换行 · 回答基于课程资料生成，请自行核对</p>
+      </section>
+
+      <aside class="records-panel" aria-label="最近问答记录">
+        <div class="records-head">
+          <div>
+            <h2>最近问答</h2>
+            <p>保存在 data/qa-records.jsonl</p>
+          </div>
+          <button type="button" class="link-btn" id="refreshRecords">刷新</button>
+        </div>
+        <div class="records" id="records">
+          <p class="records-empty">还没有问答记录，提出第一个问题试试吧。</p>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>AI 答疑助手 · 课程资料检索 + 大模型回答</span>
+      <span>回答仅供学习参考，重要结论请查阅原始资料</span>
+    </footer>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
