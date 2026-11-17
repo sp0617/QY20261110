@@ -10,7 +10,7 @@ on:
       - '.github/workflows/docker-verify.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: docker-${{ github.ref }}
@@ -49,13 +49,17 @@ jobs:
           EOF
           START=$(date +%s)
           docker build -t aiqa-before -f /tmp/before/Dockerfile.before /tmp/before
-          echo "对照镜像构建耗时：$(( $(date +%s) - START )) 秒"
+          ELAPSED=$(( $(date +%s) - START ))
+          echo "对照镜像构建耗时：${ELAPSED} 秒"
+          echo "BEFORE_BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
 
       - name: 构建正式镜像 aiqa
         run: |
           START=$(date +%s)
           docker build -t aiqa .
-          echo "正式镜像构建耗时：$(( $(date +%s) - START )) 秒"
+          ELAPSED=$(( $(date +%s) - START ))
+          echo "正式镜像构建耗时：${ELAPSED} 秒"
+          echo "BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
           docker images | grep -E 'aiqa|node' || true
 
       - name: 对比镜像体积
@@ -112,7 +116,67 @@ jobs:
           echo "// 缓存测试 $(date +%s)" >> src/server.js
           START=$(date +%s)
           docker build -t aiqa .
-          echo "二次构建耗时：$(( $(date +%s) - START )) 秒"
+          ELAPSED=$(( $(date +%s) - START ))
+          echo "二次构建耗时：${ELAPSED} 秒"
+          echo "REBUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+
+      - name: 回写验证报告到仓库
+        if: always()
+        run: |
+          BASE=$(docker image inspect node:24-alpine --format '{{.Size}}' 2>/dev/null || echo 0)
+          BEFORE=$(docker image inspect aiqa-before --format '{{.Size}}' 2>/dev/null || echo 0)
+          AFTER=$(docker image inspect aiqa --format '{{.Size}}' 2>/dev/null || echo 0)
+          BASE_MB=$(awk -v b="$BASE" 'BEGIN{printf "%.1f", b/1024/1024}')
+          BEFORE_MB=$(awk -v b="$BEFORE" 'BEGIN{printf "%.1f", b/1024/1024}')
+          AFTER_MB=$(awk -v b="$AFTER" 'BEGIN{printf "%.1f", b/1024/1024}')
+          APP_MB=$(awk -v a="$AFTER" -v b="$BASE" 'BEGIN{printf "%.2f", (a-b)/1024/1024}')
+          SAVED_MB=$(awk -v a="$BEFORE" -v b="$AFTER" 'BEGIN{printf "%.2f", (a-b)/1024/1024}')
+          HEALTH=$(curl -s http://localhost:3000/api/health || echo '服务未响应')
+          ASK=$(curl -s -X POST http://localhost:3000/api/ask -H 'Content-Type: application/json' -d '{"question":"什么是过拟合？"}' | head -c 400 || true)
+          PORTS=$(docker ps --filter name=qa-helper --format '{{.Names}} {{.Status}} {{.Ports}}' || true)
+          {
+            echo "# Docker 构建与运行验证结果"
+            echo ""
+            echo "- 运行时间：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "- 提交：$GITHUB_SHA"
+            echo ""
+            echo "## 镜像体积"
+            echo ""
+            echo "| 镜像 | 体积 | 应用内容层 |"
+            echo "| --- | --- | --- |"
+            echo "| node:24-alpine | ${BASE_MB} MB | - |"
+            echo "| aiqa-before（未使用 .dockerignore） | ${BEFORE_MB} MB | $(awk -v a="$BEFORE" -v b="$BASE" 'BEGIN{printf "%.2f", (a-b)/1024/1024}') MB |"
+            echo "| aiqa（使用 .dockerignore） | ${AFTER_MB} MB | ${APP_MB} MB |"
+            echo ""
+            echo "体积差：优化后比优化前减少 ${SAVED_MB} MB。"
+            echo ""
+            echo "## 构建耗时"
+            echo ""
+            echo "- 对照镜像（完整上下文）：${BEFORE_BUILD_SECONDS} 秒"
+            echo "- 正式镜像（首次）：${BUILD_SECONDS} 秒"
+            echo "- 修改 src/server.js 后重建：${REBUILD_SECONDS} 秒"
+            echo ""
+            echo "## 容器运行"
+            echo ""
+            echo '```'
+            echo "$PORTS"
+            echo '```'
+            echo ""
+            echo "健康检查："
+            echo '```json'
+            echo "$HEALTH"
+            echo '```'
+            echo ""
+            echo "提问接口（截断）："
+            echo '```json'
+            echo "$ASK"
+            echo '```'
+          } > docker-report.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docker-report.md
+          git commit -m "chore: 记录 Docker 构建与运行验证结果 [skip ci]" || echo "没有变更"
+          git push origin HEAD:main || echo "推送失败"
 
       - name: 清理容器
         if: always()
