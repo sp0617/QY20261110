@@ -140,6 +140,7 @@ jobs:
           HEALTH=$(curl -s http://localhost:3000/api/health || echo '服务未响应')
           ASK=$(curl -s -X POST http://localhost:3000/api/ask -H 'Content-Type: application/json' -d '{"question":"什么是过拟合？"}' | head -c 400 || true)
           PORTS=$(docker ps --filter name=qa-helper --format '{{.Names}} {{.Status}} {{.Ports}}' || true)
+          printf '\xEF\xBB\xBF' > docker-report.md
           {
             echo "# Docker 构建与运行验证结果"
             echo ""
@@ -178,7 +179,7 @@ jobs:
             echo '```json'
             echo "$ASK"
             echo '```'
-          } > docker-report.md
+          } >> docker-report.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docker-report.md
