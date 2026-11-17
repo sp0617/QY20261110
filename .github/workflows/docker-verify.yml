@@ -47,19 +47,19 @@ jobs:
           EXPOSE 3000
           CMD ["npm", "start"]
           EOF
-          START=$(date +%s)
+          START=$(date +%s%3N)
           docker build -t aiqa-before -f /tmp/before/Dockerfile.before /tmp/before
-          ELAPSED=$(( $(date +%s) - START ))
-          echo "对照镜像构建耗时：${ELAPSED} 秒"
-          echo "BEFORE_BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+          ELAPSED=$(( $(date +%s%3N) - START ))
+          echo "对照镜像构建耗时：${ELAPSED} ms"
+          echo "BEFORE_BUILD_MS=$ELAPSED" >> "$GITHUB_ENV"
 
       - name: 构建正式镜像 aiqa
         run: |
-          START=$(date +%s)
+          START=$(date +%s%3N)
           docker build -t aiqa .
-          ELAPSED=$(( $(date +%s) - START ))
-          echo "正式镜像构建耗时：${ELAPSED} 秒"
-          echo "BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+          ELAPSED=$(( $(date +%s%3N) - START ))
+          echo "正式镜像构建耗时：${ELAPSED} ms"
+          echo "BUILD_MS=$ELAPSED" >> "$GITHUB_ENV"
           docker images | grep -E 'aiqa|node' || true
 
       - name: 对比镜像体积
@@ -114,11 +114,17 @@ jobs:
       - name: 改源码后重建（验证层缓存）
         run: |
           echo "// 缓存测试 $(date +%s)" >> src/server.js
-          START=$(date +%s)
-          docker build -t aiqa .
-          ELAPSED=$(( $(date +%s) - START ))
-          echo "二次构建耗时：${ELAPSED} 秒"
-          echo "REBUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+          START=$(date +%s%3N)
+          docker build -t aiqa . 2>&1 | tee /tmp/rebuild.log
+          CACHED_MS=$(( $(date +%s%3N) - START ))
+          CACHED_COUNT=$(grep -c CACHED /tmp/rebuild.log || true)
+          START=$(date +%s%3N)
+          docker build --no-cache -t aiqa-nocache . 2>&1 | tee /tmp/nocache.log
+          NOCACHE_MS=$(( $(date +%s%3N) - START ))
+          echo "改源码后重建：${CACHED_MS} ms（CACHED 层 ${CACHED_COUNT} 个）；--no-cache 对照：${NOCACHE_MS} ms"
+          echo "CACHED_MS=$CACHED_MS" >> "$GITHUB_ENV"
+          echo "CACHED_COUNT=$CACHED_COUNT" >> "$GITHUB_ENV"
+          echo "NOCACHE_MS=$NOCACHE_MS" >> "$GITHUB_ENV"
 
       - name: 回写验证报告到仓库
         if: always()
@@ -152,9 +158,10 @@ jobs:
             echo ""
             echo "## 构建耗时"
             echo ""
-            echo "- 对照镜像（完整上下文）：${BEFORE_BUILD_SECONDS} 秒"
-            echo "- 正式镜像（首次）：${BUILD_SECONDS} 秒"
-            echo "- 修改 src/server.js 后重建：${REBUILD_SECONDS} 秒"
+            echo "- 对照镜像（完整上下文，首次）：${BEFORE_BUILD_MS} ms"
+            echo "- 正式镜像（首次）：${BUILD_MS} ms"
+            echo "- 修改 src/server.js 后重建（命中缓存）：${CACHED_MS} ms，复用 CACHED 层 ${CACHED_COUNT} 个"
+            echo "- 同等条件 --no-cache 重建：${NOCACHE_MS} ms"
             echo ""
             echo "## 容器运行"
             echo ""
