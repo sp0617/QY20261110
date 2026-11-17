@@ -1,0 +1,119 @@
+name: Docker 构建与运行验证
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/docker-verify.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-verify:
+    name: 镜像构建与容器运行验证
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 查看 Docker 版本并预拉基础镜像
+        run: |
+          docker version --format '客户端 {{.Client.Version}} / 服务端 {{.Server.Version}}'
+          docker pull node:24-alpine
+          BASE=$(docker image inspect node:24-alpine --format '{{.Size}}')
+          echo "BASE_SIZE=$BASE" >> "$GITHUB_ENV"
+          echo "基础镜像 node:24-alpine：$(awk -v b=$BASE 'BEGIN{printf "%.1f MB", b/1024/1024}')"
+
+      - name: 构建优化前的对照镜像（完整上下文）
+        run: |
+          rm -rf /tmp/before && mkdir -p /tmp/before
+          rsync -a --exclude .git ./ /tmp/before/
+          rm -f /tmp/before/.dockerignore
+          cat > /tmp/before/Dockerfile.before <<'EOF'
+          FROM node:24-alpine
+          WORKDIR /app
+          COPY . .
+          ENV PORT=3000 HOST=0.0.0.0
+          USER node
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+          START=$(date +%s)
+          docker build -t aiqa-before -f /tmp/before/Dockerfile.before /tmp/before
+          echo "对照镜像构建耗时：$(( $(date +%s) - START )) 秒"
+
+      - name: 构建正式镜像 aiqa
+        run: |
+          START=$(date +%s)
+          docker build -t aiqa .
+          echo "正式镜像构建耗时：$(( $(date +%s) - START )) 秒"
+          docker images | grep -E 'aiqa|node' || true
+
+      - name: 对比镜像体积
+        run: |
+          BEFORE=$(docker image inspect aiqa-before --format '{{.Size}}')
+          AFTER=$(docker image inspect aiqa --format '{{.Size}}')
+          BEFORE_MB=$(awk -v b=$BEFORE 'BEGIN{printf "%.1f", b/1024/1024}')
+          AFTER_MB=$(awk -v b=$AFTER 'BEGIN{printf "%.1f", b/1024/1024}')
+          BASE_MB=$(awk -v b=$BASE_SIZE 'BEGIN{printf "%.1f", b/1024/1024}')
+          SAVED=$(awk -v a=$BEFORE -v b=$AFTER 'BEGIN{printf "%.2f", (a-b)/1024/1024}')
+          echo "优化前：$BEFORE_MB MB（$(awk -v a=$BEFORE -v b=$BASE_SIZE 'BEGIN{printf "%.2f", (a-b)/1024/1024}') MB 为应用内容）"
+          echo "优化后：$AFTER_MB MB（$(awk -v a=$AFTER -v b=$BASE_SIZE 'BEGIN{printf "%.2f", (a-b)/1024/1024}') MB 为应用内容）"
+          echo "基础镜像：$BASE_MB MB；优化减少：$SAVED MB"
+          echo "::notice title=镜像体积::aiqa $AFTER_MB MB（优化前 $BEFORE_MB MB，减少 $SAVED MB）"
+          {
+            echo "### Docker 镜像体积"
+            echo ""
+            echo "| 镜像 | 体积 | 应用内容层 |"
+            echo "| --- | --- | --- |"
+            echo "| node:24-alpine（基础） | $BASE_MB MB | - |"
+            echo "| aiqa-before（未用 .dockerignore） | $BEFORE_MB MB | $(awk -v a=$BEFORE -v b=$BASE_SIZE 'BEGIN{printf "%.2f", (a-b)/1024/1024}') MB |"
+            echo "| aiqa（优化后） | $AFTER_MB MB | $(awk -v a=$AFTER -v b=$BASE_SIZE 'BEGIN{printf "%.2f", (a-b)/1024/1024}') MB |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 查看镜像分层
+        run: docker history aiqa --format 'table {{.Size}}\t{{.CreatedBy}}' | head -n 12
+
+      - name: 后台启动容器并查看运行状态
+        run: |
+          docker run -d -p 3000:3000 --name qa-helper aiqa
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker ps --filter name=qa-helper --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+
+      - name: 访问页面与接口验证
+        run: |
+          echo "首页状态码：$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)"
+          echo "健康检查："
+          curl -s http://localhost:3000/api/health
+          echo ""
+          echo "提问接口："
+          curl -s -X POST http://localhost:3000/api/ask \
+            -H 'Content-Type: application/json' \
+            -d '{"question":"什么是过拟合？"}' | head -c 800
+          echo ""
+
+      - name: 查看容器日志
+        run: docker logs qa-helper
+
+      - name: 改源码后重建（验证层缓存）
+        run: |
+          echo "// 缓存测试 $(date +%s)" >> src/server.js
+          START=$(date +%s)
+          docker build -t aiqa .
+          echo "二次构建耗时：$(( $(date +%s) - START )) 秒"
+
+      - name: 清理容器
+        if: always()
+        run: docker rm -f qa-helper || true
